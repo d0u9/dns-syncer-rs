@@ -17,12 +17,13 @@ struct ConfigBackend {
 
 #[derive(Debug, Deserialize)]
 struct ConfigYaml {
-    check_interval: u32,
+    check_interval: u64,
     backends: Vec<ConfigBackend>,
 }
 
+#[derive(Debug)]
 pub struct Config {
-    pub check_interval: u32,
+    pub check_interval: u64,
 }
 
 impl ConfigYaml {

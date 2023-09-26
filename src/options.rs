@@ -5,4 +5,6 @@ use clap::Parser;
 pub struct Options {
     #[arg(short, long)]
     pub config_file: String,
+    #[arg(long)]
+    pub log_level: Option<tracing::Level>,
 }

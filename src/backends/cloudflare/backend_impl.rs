@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
+use tracing::{debug, error, info};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Cloudflare {
@@ -36,6 +37,82 @@ impl Action {
         }
 
         Ok(())
+    }
+
+    fn from_patch(
+        patch: &mut Record,
+        remote: &Record,
+        name: &str,
+        content: &str,
+        dns_type: &DNSType,
+    ) -> Result<Self> {
+        // name is a required field
+        patch.name = name.to_owned();
+        // type is a required field
+        patch.dns_type = dns_type.to_owned();
+        // content is a required field
+        patch.content = content.to_owned();
+
+        let old_val_json = serde_json::to_string_pretty(remote)?;
+        let patch_json = serde_json::to_string_pretty(patch)?;
+
+        {
+            use tabled::{
+                builder::Builder,
+                settings::{object::Rows, Alignment, Modify},
+            };
+            let mut builder = Builder::default();
+            builder.push_record(vec!["Old Record", "Patch"]);
+            builder.push_record(vec![&old_val_json, &patch_json]);
+            let mut table = builder.build();
+            table.with(
+                Modify::new(Rows::first()).with(Alignment::center()), // .with(AlignmentStrategy::PerCell),
+            );
+            info!("\n{}", table);
+        }
+
+        let action = Action::Patch(remote.id.clone(), serde_json::from_str(&patch_json)?);
+
+        Ok(action)
+    }
+
+    fn new(record: &Record, v4addr: &str) -> Result<Self> {
+        let mut local = record.clone();
+        if local.content.is_empty() {
+            local.content = v4addr.to_owned();
+        }
+        if local.ttl.is_none() {
+            local.ttl = Some(1);
+        }
+        if local.proxied.is_none() {
+            local.proxied = Some(false);
+        }
+
+        let post_body = serde_json::to_string_pretty(&local)?;
+
+        {
+            use tabled::{
+                builder::Builder,
+                settings::{object::Rows, Alignment, Modify},
+            };
+
+            let note = if local.content.is_empty() {
+                ""
+            } else {
+                "IP is automatically obtained from Cloudfalre"
+            };
+
+            let mut builder = Builder::default();
+            builder.push_record(vec!["New DNS Record", "Note"]);
+            builder.push_record(vec![&post_body, note]);
+            let mut table = builder.build();
+            table.with(Modify::new(Rows::first()).with(Alignment::center()));
+            info!("\n{}", table);
+        }
+
+        let action = Action::Post(serde_json::from_str(&post_body)?);
+
+        Ok(action)
     }
 
     async fn patch(zone_id: &str, auth: &Auth, record_id: &str, data: &JsonValue) -> Result<()> {
@@ -108,7 +185,7 @@ impl Zone {
                 }
 
                 if local.dns_type != remote.dns_type {
-                    println!(
+                    debug!(
                         "dns type changed from {:?} to {:?}",
                         remote.dns_type, local.dns_type
                     );
@@ -118,7 +195,7 @@ impl Zone {
                 if (local.content.is_empty() && v4addr != remote.content)
                     || (!local.content.is_empty() && local.content != remote.content)
                 {
-                    println!(
+                    debug!(
                         "content change from {} to {}",
                         remote.content, local.content
                     );
@@ -128,74 +205,61 @@ impl Zone {
                 // ttl == 1 means auto
                 match (&local.ttl, &remote.ttl) {
                     (Some(local), Some(remote)) if local != remote => {
-                        println!("ttl changed from {:?} to {:?}", remote, local);
+                        debug!("ttl changed from {:?} to {:?}", remote, local);
                         need_update = true;
                         patch.ttl = Some(local.to_owned());
                     }
                     (_, None) => {
-                        println!("[BUG] remote ttl is NONE");
+                        error!("[BUG] remote ttl is NONE");
                     }
                     _ => {}
                 };
 
                 match (&local.proxied, &remote.proxied) {
                     (Some(local), Some(remote)) if local != remote => {
-                        println!("proxied changed from {:?} to {:?}", remote, local);
+                        debug!("proxied changed from {:?} to {:?}", remote, local);
                         need_update = true;
                         patch.proxied = Some(local.to_owned());
                     }
                     (_, None) => {
-                        println!("[BUG] remote proxied is NONE");
+                        error!("[BUG] remote proxied is NONE");
                     }
                     _ => {}
                 }
 
                 match (&local.comment, &remote.comment) {
                     (Some(local), Some(remote)) if local != remote => {
-                        println!("comment changed from {:?} to {:?}", remote, local);
+                        debug!("comment changed from {:?} to {:?}", remote, local);
                         need_update = true;
                         patch.comment = Some(local.clone());
                     }
                     _ => {}
                 }
 
+                processed = true;
                 if need_update {
-                    // name is a required field
-                    patch.name = local.name.clone();
-                    // type is a required field
-                    patch.dns_type = local.dns_type.to_owned();
-                    patch.content = if local.content.is_empty() {
-                        // content is a required field
-                        v4addr.to_owned()
+                    let content = if local.content.is_empty() {
+                        v4addr
                     } else {
-                        // content is a required field
-                        local.content.clone()
+                        &local.content
                     };
 
-                    let json = serde_json::to_value(patch)?;
-                    actions.push(Action::Patch(remote.id.clone(), json));
+                    let action = Action::from_patch(
+                        &mut patch,
+                        remote,
+                        &local.name,
+                        content,
+                        &local.dns_type,
+                    )?;
+                    actions.push(action);
                 }
-
-                processed = true
             }
 
             if processed {
                 continue;
             }
 
-            let mut local_clone = local.clone();
-            if local_clone.content.is_empty() {
-                local_clone.content = v4addr.to_owned();
-            }
-            if local_clone.ttl.is_none() {
-                local_clone.ttl = Some(1);
-            }
-            if local_clone.proxied.is_none() {
-                local_clone.proxied = Some(false);
-            }
-
-            let json = serde_json::to_value(local_clone)?;
-            actions.push(Action::Post(json));
+            actions.push(Action::new(local, v4addr)?);
         }
 
         Ok(actions)
@@ -203,7 +267,7 @@ impl Zone {
 
     async fn do_actions(&self, auth: &Auth, actions: Vec<Action>) -> Result<()> {
         for action in actions.into_iter() {
-            println!("===> Action ==> {:?}", action);
+            info!("===> Action ==> {:?}", action);
             action.do_action(&self.id, auth).await?;
         }
         Ok(())
