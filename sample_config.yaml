@@ -1,0 +1,17 @@
+check_interval: 30
+backends:
+- provider: cloudflare
+  authentication:
+    api_token: AABBCCDDEEFFGG
+  zones:
+  - id: 112233445566
+    records:
+    - type: A
+      name: test1.example-au.org
+      proxied: true
+      content: 8.8.8.8
+      comment: DNS Syncer, google dns
+    - type: A
+      proxied: false
+      name: test2.example-au.org
+      comment: test2 only
