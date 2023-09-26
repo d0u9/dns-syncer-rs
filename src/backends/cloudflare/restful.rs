@@ -1,4 +1,5 @@
 use crate::err::*;
+use reqwest::Response;
 use serde_json::Value as JsonVal;
 
 pub struct Restful;
@@ -34,11 +35,22 @@ impl Restful {
         Ok(builder)
     }
 
+    async fn non_200_to_error(resp: Response) -> Result<String> {
+        let status = resp.status();
+        if status != 200 {
+            return Err(AppErr{
+                msg: format!("Not a 200 response: {}", resp.text().await?),
+            });
+        }
+        let body = resp.text().await?;
+        Ok(body)
+    }
+
     pub async fn get(url: &str, headers: Option<Vec<(&str, &str)>>) -> Result<serde_json::Value> {
         let builder = Self::request_builder(url, ReqMethod::Get, headers)?;
 
-        let body = builder.send().await?.text().await?;
-
+        let resp = builder.send().await?;
+        let body = Self::non_200_to_error(resp).await?;
         let json: serde_json::Value = serde_json::from_str(&body)?;
 
         Ok(json)
@@ -51,8 +63,8 @@ impl Restful {
     ) -> Result<serde_json::Value> {
         let builder = Self::request_builder(url, ReqMethod::Post, headers)?;
 
-        let body = builder.json(json).send().await?.text().await?;
-
+        let resp = builder.json(json).send().await?;
+        let body = Self::non_200_to_error(resp).await?;
         let json: serde_json::Value = serde_json::from_str(&body)?;
 
         Ok(json)
@@ -66,9 +78,7 @@ impl Restful {
         let builder = Self::request_builder(url, ReqMethod::Patch, headers)?;
 
         let resp = builder.json(json).send().await?;
-
-        let body = resp.text().await?;
-
+        let body = Self::non_200_to_error(resp).await?;
         let json: serde_json::Value = serde_json::from_str(&body)?;
 
         Ok(json)

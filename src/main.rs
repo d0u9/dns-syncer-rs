@@ -10,7 +10,7 @@ use crate::options::Options;
 use crate::yaml_parse::*;
 
 use clap::Parser;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
@@ -53,7 +53,12 @@ async fn run_as_blocking(config: &Config, backends: &[Backend]) -> Result<()> {
 
     loop {
         interval.tick().await;
-        run_once(config, backends).await?;
+
+        let sync_result = run_once(config, backends).await;
+        match sync_result {
+            Ok(_) => {},
+            Err(e) => error!("[Sync Failed] {:?}", e),
+        }
     }
 }
 
@@ -61,7 +66,7 @@ async fn run_once(_config: &Config, backends: &[Backend]) -> Result<()> {
     let v4addr = get_ip::get_pub_ip_v4().await?;
 
     for backend in backends.iter() {
-        backend.sync(&v4addr).await.unwrap();
+        backend.sync(&v4addr).await?;
     }
 
     Ok(())
