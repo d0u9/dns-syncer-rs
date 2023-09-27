@@ -10,6 +10,7 @@ use crate::options::Options;
 use crate::yaml_parse::*;
 
 use clap::Parser;
+use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -55,14 +56,21 @@ async fn run_as_blocking(config: &Config, backends: &[Backend]) -> Result<()> {
     let mut interval =
         tokio::time::interval(tokio::time::Duration::from_secs(config.check_interval));
 
-    loop {
-        interval.tick().await;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
 
+    loop {
         let sync_result = run_once(config, backends).await;
         match sync_result {
             Ok(_) => {}
             Err(e) => error!("[Sync Failed] {:?}", e),
         }
+
+        tokio::select! {
+            _ = sigterm.recv() => { return Err(AppErr{ msg: "Receive SIGTERM, quit".to_string() } )  },
+            _ = sigint.recv() => { return Err(AppErr{ msg: "Receive SIGINT, quit".to_string() } ) },
+            _ = interval.tick() => {},
+        };
     }
 }
 

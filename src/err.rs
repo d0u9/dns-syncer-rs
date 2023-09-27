@@ -36,3 +36,11 @@ impl From<serde_yaml::Error> for AppErr {
         }
     }
 }
+
+impl From<std::io::Error> for AppErr {
+    fn from(value: std::io::Error) -> Self {
+        Self {
+            msg: format!("[io error]: {:?}", value),
+        }
+    }
+}
