@@ -2,9 +2,9 @@ mod restful;
 
 use std::collections::HashMap;
 
-use restful::*;
 use crate::backends::DNSSync;
 use crate::err::*;
+use restful::*;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -269,8 +269,9 @@ impl Zone {
 
     async fn do_actions(&self, auth: &Auth, actions: Vec<Action>) -> Result<()> {
         for action in actions.into_iter() {
-            info!("===> Action ==> {:?}", action);
-            action.do_action(&self.id, auth).await?;
+            if let Err(e) = action.do_action(&self.id, auth).await {
+                error!("do this action failed: {:?}\n{:?}", e, action);
+            }
         }
         Ok(())
     }

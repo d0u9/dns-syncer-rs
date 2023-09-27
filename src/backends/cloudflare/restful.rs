@@ -38,7 +38,7 @@ impl Restful {
     async fn non_200_to_error(resp: Response) -> Result<String> {
         let status = resp.status();
         if status != 200 {
-            return Err(AppErr{
+            return Err(AppErr {
                 msg: format!("Not a 200 response: {}", resp.text().await?),
             });
         }

@@ -10,20 +10,24 @@ use crate::options::Options;
 use crate::yaml_parse::*;
 
 use clap::Parser;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let opts = Options::parse();
-    let mut tracing_builder = tracing_subscriber::fmt()
-        .with_file(true)
-        .with_line_number(true);
+    let mut log_level = tracing::Level::INFO;
+    let mut tracing_builder = tracing_subscriber::fmt();
 
     tracing_builder = if let Some(level) = opts.log_level {
+        log_level = level;
         tracing_builder.with_max_level(level)
     } else {
-        tracing_builder.with_max_level(tracing::Level::INFO)
+        tracing_builder.with_max_level(log_level)
+    };
+
+    if log_level >= tracing::Level::DEBUG {
+        tracing_builder = tracing_builder.with_file(true).with_line_number(true);
     };
 
     tracing_builder.finish().init();
@@ -56,7 +60,7 @@ async fn run_as_blocking(config: &Config, backends: &[Backend]) -> Result<()> {
 
         let sync_result = run_once(config, backends).await;
         match sync_result {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => error!("[Sync Failed] {:?}", e),
         }
     }
